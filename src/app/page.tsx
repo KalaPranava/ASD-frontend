@@ -182,7 +182,7 @@ export default function Home() {
 {/* Bottom Glow */}
 <div className="glow-leak absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full opacity-40"></div>
 <h2 className="text-4xl md:text-5xl font-headline font-bold text-on-surface mb-6 relative z-10">Ready to transform EEG analysis?</h2>
-<p className="text-on-surface-variant text-lg mb-10 max-w-xl mx-auto relative z-10">Join leading neurological institutes globally using NeuroLens to provide better patient care with AI precision.</p>
+<p className="text-on-surface-variant text-lg mb-10 max-w-2xl mx-auto relative z-10">Empower your practice with AI-assisted diagnostics. Instantly upload EEG recordings to generate precise patient analytics and seamlessly manage case histories all from one interactive dashboard.</p>
 <div className="flex flex-col sm:flex-row gap-4 justify-center relative z-10">
 <Link href="/register" className="synaptic-pulse px-10 py-4 rounded-full text-on-primary-fixed font-bold text-lg hover:scale-105 transition-all hover:shadow-[0_0_25px_rgba(217,70,239,0.8)]">
                         Get Started Now
@@ -195,6 +195,9 @@ export default function Home() {
 <footer className="w-full py-12 border-t border-outline-variant bg-surface">
 <div className="flex flex-col md:flex-row justify-between items-center max-w-7xl mx-auto px-6 gap-6">
 <div className="flex items-center gap-2">
+<svg className="w-8 h-8 text-primary animate-[bounce-eeg_2s_infinite_ease-in-out]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+   <path d="M2 12h4l3-9 5 18 3-9h5" strokeLinecap="round" strokeLinejoin="round" />
+</svg>
 <span className="text-xl font-bold font-headline text-on-surface">Neuro<span className="text-primary">Lens</span></span>
 </div>
 <div className="flex gap-8 text-sm font-body">

@@ -9,7 +9,8 @@ export default function AuthForm({ defaultTab = "signin" }: { defaultTab?: "sign
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"doctor" | "patient">("doctor");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -24,7 +25,7 @@ export default function AuthForm({ defaultTab = "signin" }: { defaultTab?: "sign
     setErrorMsg("");
     setSuccessMsg("");
 
-    if (!email || !password) {
+    if (!email || !password || (activeTab === "register" && (!firstName || !lastName))) {
       setErrorMsg("Please fill out all fields.");
       return;
     }
@@ -40,15 +41,12 @@ export default function AuthForm({ defaultTab = "signin" }: { defaultTab?: "sign
           setIsLoading(false);
           return;
         }
-        users[email] = { password, role };
+        users[email] = { password, role: "doctor", firstName, lastName };
         localStorage.setItem("mockUsers", JSON.stringify(users));
+        localStorage.setItem("activeUser", JSON.stringify({ email, firstName, lastName }));
         
-        // Success simulated - Redirect Home or Dashboard
-        if (role === "doctor") {
-          window.location.href = "/dashboard";
-        } else {
-          window.location.href = "/patient-dashboard";
-        }
+        // Success simulated - Redirect Dashboard
+        window.location.href = "/dashboard";
         return;
       } else {
         if (!users[email]) {
@@ -58,12 +56,10 @@ export default function AuthForm({ defaultTab = "signin" }: { defaultTab?: "sign
           setErrorMsg("Incorrect password.");
           setIsLoading(false);
         } else {
-          // Success simulated - Redirect Home or Dashboard
-          if (users[email].role === "doctor") {
-            window.location.href = "/dashboard";
-          } else {
-            window.location.href = "/patient-dashboard";
-          }
+          // Success simulated - Redirect Dashboard
+          const user = users[email];
+          localStorage.setItem("activeUser", JSON.stringify({ email, firstName: user.firstName, lastName: user.lastName }));
+          window.location.href = "/dashboard";
           return;
         }
       }
@@ -78,16 +74,12 @@ export default function AuthForm({ defaultTab = "signin" }: { defaultTab?: "sign
 
       {/* Header Actions & Brand */}
       <header className="flex justify-between items-center p-8 z-10 max-w-7xl mx-auto w-full">
-        <Link href="/" className="flex items-center gap-4 group">
-          <div className="flex items-end gap-1 h-6">
-            <div className="eeg-bar" style={{ animationDelay: "0.1s" }}></div>
-            <div className="eeg-bar" style={{ animationDelay: "0.3s" }}></div>
-            <div className="eeg-bar" style={{ animationDelay: "0.5s" }}></div>
-            <div className="eeg-bar" style={{ animationDelay: "0.2s" }}></div>
-          </div>
-          <span className="font-headline text-xl font-bold tracking-tighter">
-            <span className="text-on-surface">Neuro</span>
-            <span className="text-primary">Lens</span>
+        <Link href="/" className="flex items-center gap-3 group">
+          <svg className="w-10 h-10 text-primary animate-[bounce-eeg_2s_infinite_ease-in-out]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+             <path d="M2 12h4l3-9 5 18 3-9h5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="text-2xl font-bold font-headline tracking-tight">
+            <span className="text-on-surface">Neuro</span><span className="text-primary">Lens</span>
           </span>
         </Link>
         <button
@@ -141,35 +133,36 @@ export default function AuthForm({ defaultTab = "signin" }: { defaultTab?: "sign
             )}
 
             {activeTab === "register" && (
-              <div className="space-y-2">
-                <label className="block text-xs font-label uppercase tracking-widest text-on-surface-variant ml-1">
-                  I am a
-                </label>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setRole("doctor")}
-                    className={`flex items-center justify-center gap-2 py-4 px-6 rounded-2xl font-headline transition-all ${
-                      role === "doctor"
-                        ? "bg-primary-container text-on-primary-container font-bold border-2 border-primary-container"
-                        : "bg-surface-container-highest text-on-surface-variant font-medium border-2 border-transparent hover:border-outline/30"
-                    }`}
-                  >
-                    <span>👨‍⚕️</span>
-                    <span>Doctor</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRole("patient")}
-                    className={`flex items-center justify-center gap-2 py-4 px-6 rounded-2xl font-headline transition-all ${
-                      role === "patient"
-                        ? "bg-primary-container text-on-primary-container font-bold border-2 border-primary-container"
-                        : "bg-surface-container-highest text-on-surface-variant font-medium border-2 border-transparent hover:border-outline/30"
-                    }`}
-                  >
-                    <span>👱</span>
-                    <span>Patient</span>
-                  </button>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-xs font-label uppercase tracking-widest text-on-surface-variant ml-1">
+                    First Name
+                  </label>
+                  <div className="relative group">
+                    <input
+                      required={activeTab === "register"}
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      className="w-full bg-surface-container-highest border-none rounded-2xl py-4 px-6 text-on-surface placeholder:text-outline focus:ring-1 focus:ring-primary/40 transition-all outline-none"
+                      placeholder="Sarah"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-label uppercase tracking-widest text-on-surface-variant ml-1">
+                    Last Name
+                  </label>
+                  <div className="relative group">
+                    <input
+                      required={activeTab === "register"}
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      className="w-full bg-surface-container-highest border-none rounded-2xl py-4 px-6 text-on-surface placeholder:text-outline focus:ring-1 focus:ring-primary/40 transition-all outline-none"
+                      placeholder="Jenkins"
+                    />
+                  </div>
                 </div>
               </div>
             )}

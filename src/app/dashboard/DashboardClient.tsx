@@ -30,25 +30,24 @@ interface Recording {
   action: string;
 }
 
-const PATIENTS = [
-  { id: "8829-X", name: "Marcus Holloway" },
-  { id: "4421-B", name: "Elena Vasquez" },
-  { id: "7732-C", name: "James Okafor" },
-  { id: "2218-D", name: "Priya Nair" },
-];
-
-const MOCK_TABLE_RECORDINGS: Recording[] = [
-  { patient: "Marcus Holloway (8829-X)", file: "eeg_recording.edf", date: "2026-04-14", duration: "04:30:00", status: "Processed", action: "View Status" },
-  { patient: "P001 (John)", file: "eeg_001.edf", date: "2026-04-05", duration: "00:30:00", status: "Processed", action: "View / Download" },
-  { patient: "P002 (Aisha)", file: "sleep_study.edf", date: "2026-04-06", duration: "08:00:00", status: "Processing", action: "View Status" },
-  { patient: "P003 (Rahul)", file: "seizure_test.edf", date: "2026-04-07", duration: "01:15:00", status: "Processed", action: "Analyze / Export" },
-  { patient: "P004 (Priya)", file: "eeg_trial.edf", date: "2026-04-07", duration: "00:20:00", status: "Failed", action: "Retry Upload" },
-];
+interface Patient {
+  id: string;
+  firstName: string;
+  lastName: string;
+  gender: string;
+  age: string;
+  symptoms: string;
+}
 
 export default function DashboardClient() {
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [showAddPatientModal, setShowAddPatientModal] = useState(false);
+  const [newPatient, setNewPatient] = useState({ firstName: "", lastName: "", gender: "Male", age: "", symptoms: "" });
+  
   const [activeTab, setActiveTab] = useState<"dashboard" | "patient-analytics">("dashboard");
   const [isAnalysed, setIsAnalysed] = useState(false);
-  const [recordingsList, setRecordingsList] = useState<Recording[]>(MOCK_TABLE_RECORDINGS);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [recordingsList, setRecordingsList] = useState<Recording[]>([]);
   const [analyticsSelectedPatientName, setAnalyticsSelectedPatientName] = useState<string | null>(null);
   
   // Upload State variables
@@ -59,16 +58,60 @@ export default function DashboardClient() {
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
   const [noteAdded, setNoteAdded] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [mounted, setMounted] = useState(false);
   const [greeting, setGreeting] = useState("Good morning");
+  const [doctorFirstName, setDoctorFirstName] = useState("");
+  const [doctorLastName, setDoctorLastName] = useState("Rivera");
+  const [selectedEventPopup, setSelectedEventPopup] = useState<number | null>(null);
+
+  const [showSendReportModal, setShowSendReportModal] = useState(false);
+  const [sendMethod, setSendMethod] = useState<"email" | "whatsapp" | null>(null);
+  const [contactInput, setContactInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [sendSuccess, setSendSuccess] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const hour = new Date().getHours();
     setGreeting(hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
+    
+    // Load persisted doctor name
+    try {
+      const activeUserStr = window.localStorage.getItem("activeUser");
+      if (activeUserStr) {
+        const activeUser = JSON.parse(activeUserStr);
+        if (activeUser.firstName) setDoctorFirstName(activeUser.firstName);
+        if (activeUser.lastName) setDoctorLastName(activeUser.lastName);
+      }
+    } catch(e) {}
+    
+    // Load persisted patients
+    try {
+      const stored = window.localStorage.getItem("neurolens_patients");
+      if (stored) {
+        setPatients(JSON.parse(stored));
+      }
+    } catch(e) {}
+    
+    // Load persisted recordings
+    try {
+      const storedRecs = window.localStorage.getItem("neurolens_recordings");
+      if (storedRecs) {
+        const parsedRecs = JSON.parse(storedRecs) as Recording[];
+        // Auto-clean any duplicates from older sessions
+        const uniqueRecs = parsedRecs.filter((rec, index, self) =>
+          index === self.findIndex((t) => (
+            t.patient === rec.patient && t.file === rec.file
+          ))
+        );
+        window.localStorage.setItem("neurolens_recordings", JSON.stringify(uniqueRecs));
+        setRecordingsList(uniqueRecs);
+      }
+    } catch(e) {}
   }, []);
 
   // --- Reset/Handlers ---
@@ -95,22 +138,40 @@ export default function DashboardClient() {
       return;
     }
     setUploadError("");
-    setIsAnalysed(true);
+    // Hide old results & start processing animation
+    setIsAnalysed(false);
+    setIsAnalyzing(true);
     
-    const matchedPatientEntry = PATIENTS.find(p => p.name === selectedPatient);
-    const patientNameFormatted = matchedPatientEntry ? `${matchedPatientEntry.name} (${matchedPatientEntry.id})` : selectedPatient;
-    
-    setRecordingsList(prev => [
-      {
-        patient: patientNameFormatted,
-        file: selectedFile?.name || "eeg_recording.edf",
-        date: new Date().toISOString().split("T")[0],
-        duration: "04:30:00", // using mock value for now
-        status: "Processed",
-        action: "View Results"
-      },
-      ...prev
-    ]);
+    // Simulate real analysis time
+    setTimeout(() => {
+      setIsAnalyzing(false);
+      setIsAnalysed(true);
+      
+      const matchedPatientEntry = patients.find(p => p.id === selectedPatient);
+      // If not found in dynamic map, check if it's one of the mock ID leftovers or just show id
+      const patientNameFormatted = matchedPatientEntry ? matchedPatientEntry.id : selectedPatient;
+      
+      setRecordingsList(prev => {
+        const fileUploadName = selectedFile?.name || "eeg_recording.edf";
+        
+        // Remove old occurrences of EXACT same patient+file before adding it anew to prevent duplicates
+        const filteredList = prev.filter(r => !(r.patient === patientNameFormatted && r.file === fileUploadName));
+        
+        const newList: Recording[] = [
+          {
+            patient: patientNameFormatted,
+            file: fileUploadName,
+            date: new Date().toISOString().split("T")[0],
+            duration: "04:30:00", // using mock value for now
+            status: "Processed",
+            action: "View Results"
+          },
+          ...filteredList
+        ];
+        window.localStorage.setItem("neurolens_recordings", JSON.stringify(newList));
+        return newList;
+      });
+    }, 1800); // 1.8 seconds processing time
   };
 
   const handleAddNote = () => {
@@ -119,7 +180,7 @@ export default function DashboardClient() {
       const existingStr = window.localStorage.getItem("neurolens_clinical_notes");
       const existingList = existingStr ? JSON.parse(existingStr) : [];
       existingList.unshift({
-        doctor: "Dr. Rivera",
+        doctor: `Dr. ${doctorLastName}`,
         time: new Date().toISOString(),
         content: noteContent,
       });
@@ -141,7 +202,7 @@ export default function DashboardClient() {
     doc.setFont("helvetica", "normal");
     
     const lines = [
-      `Patient Name: ${selectedPatient || "Marcus Holloway"}`,
+      `Patient Name: ${patients.find(p => p.id === selectedPatient) ? `${patients.find(p => p.id === selectedPatient)?.firstName} ${patients.find(p => p.id === selectedPatient)?.lastName}` : (selectedPatient || "Unknown")}`,
       `Date of Report: ${new Date().toLocaleDateString()}`,
       "Recording Duration: 4.5 hours",
       "",
@@ -158,7 +219,7 @@ export default function DashboardClient() {
       "",
       "3. What This Means For You:",
       "   Don't panic. These events have been flagged by our AI specifically for",
-      "   your doctor (Dr. Rivera) to review. Many flagged events are minor.",
+      `   your doctor (Dr. ${doctorLastName}) to review. Many flagged events are minor.`,
       "   Your neurologist will examine these moments in detail to verify.",
       "",
       "--- Next Steps ---",
@@ -176,7 +237,26 @@ export default function DashboardClient() {
   };
 
   const handleUploadReport = () => {
-    alert("Report sent to patient dashboard. Notification sent to the patient!");
+    setShowSendReportModal(true);
+    setSendMethod(null);
+    setContactInput("");
+    setSendSuccess(false);
+  };
+
+  const executeSendReport = () => {
+    if (!contactInput.trim()) return;
+    setIsSending(true);
+    
+    // Simulate real backend processing delay
+    setTimeout(() => {
+      setIsSending(false);
+      setSendSuccess(true);
+      
+      // Auto-close modal after showing success message
+      setTimeout(() => {
+        setShowSendReportModal(false);
+      }, 2500);
+    }, 1500);
   };
 
   // Mock data for Chart.js
@@ -289,35 +369,253 @@ export default function DashboardClient() {
           
           <ThemeToggle />
           
-          <div className="flex items-center gap-4 pl-6 border-l border-outline-variant/20 cursor-pointer group relative">
-            <div className="text-right flex flex-col items-end">
-              <p className="text-sm font-bold text-on-surface group-hover:text-primary transition-colors">Dr. Rivera</p>
+          <div className="flex items-center gap-4 pl-6 border-l border-outline-variant/20 cursor-pointer relative" onClick={() => setIsProfileOpen(!isProfileOpen)}>
+            <div className="text-right flex flex-col items-end group">
+              <p className="text-sm font-bold text-on-surface group-hover:text-primary transition-colors">
+                Dr. {doctorLastName}
+              </p>
               <p className="text-[10px] text-on-surface-variant uppercase tracking-widest mt-0.5">Neurologist</p>
             </div>
-            <div className="w-10 h-10 rounded-full border-2 border-primary/40 group-hover:border-primary shadow-[0_0_10px_rgba(217,70,239,0.2)] group-hover:shadow-[0_0_15px_rgba(217,70,239,0.5)] transition-all bg-surface-container-high flex items-center justify-center text-primary font-bold">
-              DR
+            <div className="w-10 h-10 rounded-full border-2 border-primary/40 hover:border-primary shadow-[0_0_10px_rgba(217,70,239,0.2)] hover:shadow-[0_0_15px_rgba(217,70,239,0.5)] transition-all bg-surface-container-high flex items-center justify-center text-primary font-bold uppercase">
+              {doctorFirstName ? doctorFirstName[0] : "D"}{doctorLastName ? doctorLastName[0] : "R"}
             </div>
 
-            <div className="absolute top-[120%] right-0 mt-2 bg-surface border border-outline-variant/30 rounded-xl shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all p-2 z-50 min-w-[150px]">
-               <Link href="/" className="flex items-center gap-2 px-4 py-2 text-sm text-error hover:bg-error/10 rounded-lg whitespace-nowrap transition-colors">
+            <div className={`absolute top-[120%] right-0 mt-2 bg-surface/90 border border-outline-variant/30 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.4)] transition-all p-2 z-50 min-w-[160px] backdrop-blur-xl origin-top-right ${isProfileOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}>
+               <div 
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   window.localStorage.removeItem("activeUser");
+                   window.location.href = "/"; // Go to landing screen
+                 }} 
+                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-error/90 hover:text-[#ff2a2a] hover:bg-error/10 hover:shadow-[0_0_15px_rgba(255,42,42,0.4)] rounded-lg whitespace-nowrap transition-all duration-300 w-full text-left cursor-pointer"
+               >
                   <span className="material-symbols-outlined text-[18px]">logout</span>
                   Log Out
-               </Link>
+               </div>
             </div>
           </div>
         </div>
       </nav>
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 ml-[260px] mt-20 px-10 pt-4 pb-10 overflow-y-auto w-full relative">
+      <main 
+        onClick={() => { if (isProfileOpen) setIsProfileOpen(false); }}
+        className="flex-1 ml-[260px] mt-20 px-10 pt-4 pb-10 overflow-y-auto w-full relative"
+      >
         {/* Background glow effects */}
         <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full blur-[100px] opacity-30 pointer-events-none bg-[radial-gradient(circle_at_50%_50%,rgba(217,70,239,0.15)_0%,rgba(9,14,28,0)_70%)]"></div>
+
+        {/* --- EVENT MODAL --- */}
+      {selectedEventPopup && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setSelectedEventPopup(null)}>
+          <div className="bg-surface-container border border-outline-variant/30 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b border-outline-variant/20 bg-surface-container-high">
+              <h3 className="font-headline font-bold text-lg text-on-surface flex items-center gap-2">
+                <span className="material-symbols-outlined text-amber-500">warning</span>
+                Seizure window analysis - Event {selectedEventPopup}
+              </h3>
+              <button onClick={() => setSelectedEventPopup(null)} className="p-1 hover:bg-surface-variant rounded-full transition-colors text-on-surface-variant hover:text-on-surface">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <div className="w-full bg-surface-container-lowest border border-outline-variant/10 rounded-xl p-4 flex flex-col items-center">
+                 {/* Mock EEG Chart Block */}
+                 <div className="w-full h-[200px] border border-dashed border-outline-variant/50 rounded flex items-center justify-center relative overflow-hidden bg-surface-container-low hidden md:flex">
+                    {/* SVG abstract graph */}
+                    <svg viewBox="0 0 800 200" className="w-full h-full opacity-70 absolute" preserveAspectRatio="none">
+                      <path d="M0,100 C40,110 60,60 100,100 C150,150 200,50 250,90 C300,130 310,180 350,100 C390,20 420,20 450,100 C480,180 500,20 550,100 C600,180 620,110 650,90 C700,70 720,130 750,100 C780,70 800,120 800,120" stroke="var(--color-primary)" fill="none" strokeWidth="2" />
+                      <path d="M0,130 C40,130 60,80 100,150 C150,190 200,90 250,130 C300,170 310,70 350,140 C390,210 420,20 450,90 C480,160 500,60 550,120 C600,180 620,120 650,70 C700,20 720,110 750,130 C780,150 800,100 800,100" stroke="#f59e0b" fill="none" strokeWidth="2" style={selectedEventPopup === 1 ? { stroke: '#10b981' } : {}}/>
+                      <path d="M0,70 C40,50 60,110 100,60 C150,10 200,140 250,80 C300,20 310,160 350,70 C390,20 420,160 450,80 C480,0 500,190 550,90 C600,0 620,150 650,120 C700,90 720,50 750,90 C780,130 800,60 800,60" stroke="#3b82f6" fill="none" strokeWidth="1.5"/>
+                    </svg>
+                    <div className="absolute inset-y-0 w-32 left-[40%] bg-amber-500/20 border-l border-r border-amber-500/50 flex flex-col justify-start p-2">
+                       <span className="text-[10px] uppercase font-bold text-amber-500 tracking-wider">Detected Spike</span>
+                    </div>
+                 </div>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+                <div className="bg-surface-container p-3 rounded-lg border border-outline-variant/10">
+                  <div className="text-[10px] uppercase text-outline tracking-wider font-bold mb-1">Onset Time</div>
+                  <div className="font-mono text-sm text-on-surface font-bold">{selectedEventPopup === 1 ? '01:24:06' : '03:12:44'}</div>
+                </div>
+                <div className="bg-surface-container p-3 rounded-lg border border-outline-variant/10">
+                  <div className="text-[10px] uppercase text-outline tracking-wider font-bold mb-1">Duration</div>
+                  <div className="font-mono text-sm text-on-surface font-bold">{selectedEventPopup === 1 ? '47 seconds' : '31 seconds'}</div>
+                </div>
+                <div className="bg-surface-container p-3 rounded-lg border border-outline-variant/10">
+                  <div className="text-[10px] uppercase text-outline tracking-wider font-bold mb-1">Primary Channels</div>
+                  <div className="font-mono text-sm text-on-surface font-bold">{selectedEventPopup === 1 ? 'T3-T5, F7-F3' : 'C3-P3, T5-O1'}</div>
+                </div>
+                <div className="bg-surface-container p-3 rounded-lg border border-outline-variant/10">
+                  <div className="text-[10px] uppercase text-outline tracking-wider font-bold mb-1">Model Confidence</div>
+                  <div className={`font-mono text-sm font-bold ${selectedEventPopup === 1 ? 'text-emerald-500' : 'text-primary'}`}>{selectedEventPopup === 1 ? '92.3%' : '78.6%'}</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-surface-container-highest p-4 flex justify-end gap-3 rounded-b-2xl border-t border-outline-variant/20">
+               <button onClick={() => setSelectedEventPopup(null)} className="px-5 py-2 font-bold text-sm text-on-surface-variant hover:text-on-surface transition-colors">Close Viewer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- SEND REPORT MODAL --- */}
+      {showSendReportModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowSendReportModal(false)}>
+          <div className="bg-surface-container border border-outline-variant/30 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b border-outline-variant/20 bg-surface-container-high">
+              <h3 className="font-headline font-bold text-lg text-on-surface flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">send</span>
+                Send Report to Patient
+              </h3>
+              <button onClick={() => setShowSendReportModal(false)} className="p-1 hover:bg-surface-variant rounded-full transition-colors text-on-surface-variant hover:text-on-surface">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            
+            <div className="p-6 flex flex-col items-center">
+              {sendSuccess ? (
+                <div className="flex flex-col items-center p-6 text-center animate-in fade-in slide-in-from-bottom-2">
+                   <div className="w-16 h-16 bg-emerald-500/20 text-emerald-500 rounded-full flex items-center justify-center mb-4 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                      <span className="material-symbols-outlined text-[36px]">check_circle</span>
+                   </div>
+                   <h4 className="text-xl font-bold font-headline text-on-surface mb-2">Report Successfully Sent</h4>
+                   <p className="text-on-surface-variant text-sm">The patient has been securely notified via {sendMethod === 'email' ? 'Email' : 'WhatsApp'}.</p>
+                </div>
+              ) : !sendMethod ? (
+                <>
+                  <p className="text-on-surface-variant text-center mb-6 text-sm">Choose how you'd like to deliver this clinical report to <strong>{patients.find(p => p.id === selectedPatient)?.firstName || "the patient"}</strong>.</p>
+                  
+                  <div className="flex flex-col gap-4 w-full">
+                    <button 
+                      onClick={() => setSendMethod('email')} 
+                      className="w-full flex items-center gap-4 bg-surface-container-highest border border-outline-variant/30 hover:border-primary/50 hover:bg-primary/10 transition-all p-4 rounded-xl group"
+                    >
+                       <div className="w-10 h-10 bg-blue-500/20 text-blue-500 flex items-center justify-center rounded-full group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                          <span className="material-symbols-outlined text-[20px]">mail</span>
+                       </div>
+                       <div className="text-left">
+                          <div className="font-bold text-on-surface">Secure Email</div>
+                          <div className="text-xs text-on-surface-variant group-hover:text-on-surface transition-colors mt-0.5">Send a PDF link to their inbox</div>
+                       </div>
+                    </button>
+
+                    <button 
+                      onClick={() => setSendMethod('whatsapp')} 
+                      className="w-full flex items-center gap-4 bg-surface-container-highest border border-outline-variant/30 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all p-4 rounded-xl group"
+                    >
+                       <div className="w-10 h-10 bg-emerald-500/20 text-emerald-500 flex items-center justify-center rounded-full group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                          <span className="material-symbols-outlined text-[20px]">forum</span>
+                       </div>
+                       <div className="text-left">
+                          <div className="font-bold text-on-surface">WhatsApp / SMS</div>
+                          <div className="text-xs text-on-surface-variant group-hover:text-on-surface transition-colors mt-0.5">Send a secure mobile access link</div>
+                       </div>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300">
+                  <button onClick={() => setSendMethod(null)} className="flex items-center text-xs text-primary font-bold hover:underline mb-4 gap-1">
+                     <span className="material-symbols-outlined text-[14px]">arrow_back</span> Choose different method
+                  </button>
+                  
+                  <label className="block text-sm font-semibold text-on-surface mb-2">
+                     {sendMethod === 'email' ? "Enter Patient's Email Address" : "Enter Patient's WhatsApp Number"}
+                  </label>
+                  <input 
+                     type={sendMethod === 'email' ? "email" : "tel"}
+                     value={contactInput}
+                     onChange={(e) => setContactInput(e.target.value)}
+                     placeholder={sendMethod === 'email' ? "e.g. patient@example.com" : "e.g. +1 234 567 8900"}
+                     className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl px-4 py-3 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 mb-6"
+                     autoFocus
+                  />
+
+                  <button 
+                    onClick={executeSendReport}
+                    disabled={!contactInput.trim() || isSending}
+                    className="w-full py-3 bg-primary text-on-primary-fixed font-bold rounded-xl hover:bg-primary-dim transition-all shadow-[0_4px_15px_rgba(217,70,239,0.3)] disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                     {isSending ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                     ) : (
+                        <><span className="material-symbols-outlined text-[18px]">send</span> Send Now</>
+                     )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddPatientModal && (
+          <div className="fixed inset-0 bg-[#0d0912]/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-300">
+             <div className="bg-surface-container border border-outline-variant/30 rounded-2xl p-8 w-full max-w-lg shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+               <h3 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+                 <span className="material-symbols-outlined">person_add</span> Add New Patient
+               </h3>
+               
+               <div className="space-y-4 font-body">
+                 <div className="grid grid-cols-2 gap-4">
+                   <div>
+                     <label className="text-[11px] text-outline uppercase tracking-wider mb-1.5 block">First Name</label>
+                     <input className="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl p-3 text-sm focus:border-primary/50 border-solid text-on-surface focus:ring-1 focus:ring-primary/30 outline-none" value={newPatient.firstName} onChange={e => setNewPatient({...newPatient, firstName: e.target.value})} placeholder="e.g. John" />
+                   </div>
+                   <div>
+                     <label className="text-[11px] text-outline uppercase tracking-wider mb-1.5 block">Last Name</label>
+                     <input className="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl p-3 text-sm focus:border-primary/50 border-solid text-on-surface focus:ring-1 focus:ring-primary/30 outline-none" value={newPatient.lastName} onChange={e => setNewPatient({...newPatient, lastName: e.target.value})} placeholder="e.g. Doe" />
+                   </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-4">
+                   <div>
+                     <label className="text-[11px] text-outline uppercase tracking-wider mb-1.5 block">Gender</label>
+                     <select className="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl p-3 text-sm focus:border-primary/50 border-solid text-on-surface focus:ring-1 focus:ring-primary/30 outline-none" value={newPatient.gender} onChange={e => setNewPatient({...newPatient, gender: e.target.value})}>
+                       <option value="Male">Male</option>
+                       <option value="Female">Female</option>
+                       <option value="Other">Other</option>
+                     </select>
+                   </div>
+                   <div>
+                     <label className="text-[11px] text-outline uppercase tracking-wider mb-1.5 block">Age</label>
+                     <input type="number" className="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl p-3 text-sm focus:border-primary/50 border-solid text-on-surface focus:ring-1 focus:ring-primary/30 outline-none" value={newPatient.age} onChange={e => setNewPatient({...newPatient, age: e.target.value})} placeholder="e.g. 45" />
+                   </div>
+                 </div>
+
+                 <div>
+                    <label className="text-[11px] text-outline uppercase tracking-wider mb-1.5 block">Clinical Symptoms</label>
+                    <textarea className="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl p-3 text-sm focus:border-primary/50 border-solid text-on-surface focus:ring-1 focus:ring-primary/30 outline-none min-h-[80px]" value={newPatient.symptoms} onChange={e => setNewPatient({...newPatient, symptoms: e.target.value})} placeholder="Describe symptoms..."></textarea>
+                 </div>
+               </div>
+
+               <div className="mt-8 flex justify-end gap-3 font-headline">
+                 <button onClick={() => setShowAddPatientModal(false)} className="px-5 py-2.5 text-sm text-outline hover:text-on-surface transition-colors rounded-xl hover:bg-surface-variant font-semibold">Cancel</button>
+                 <button onClick={() => {
+                   if(!newPatient.firstName) return;
+                   const idNumber = patients.length + 1;
+                   const id = `P${String(idNumber).padStart(3, '0')}`;
+                   const updatedPatients = [...patients, { id, ...newPatient }];
+                   setPatients(updatedPatients);
+                   window.localStorage.setItem("neurolens_patients", JSON.stringify(updatedPatients));
+                   setShowAddPatientModal(false);
+                   setNewPatient({ firstName: "", lastName: "", gender: "Male", age: "", symptoms: "" });
+                 }} className="px-5 py-2.5 bg-primary text-on-primary-fixed rounded-xl font-bold shadow-[0_0_15px_rgba(217,70,239,0.4)] hover:shadow-[0_0_25px_rgba(217,70,239,0.6)] transition-all uppercase tracking-wide text-sm flex items-center gap-2">
+                   <span className="material-symbols-outlined text-[18px]">save</span> Save Patient
+                 </button>
+               </div>
+             </div>
+          </div>
+        )}
 
         {activeTab === "dashboard" && (
           <div className="max-w-[1240px] mx-auto w-full animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
             {/* Top Greeting Row */}
             <section className="mb-8 relative">
-              <h2 className="font-headline text-4xl text-on-surface font-bold tracking-tight mb-2">{greeting}, Dr. Rivera 👋</h2>
+              <h2 className="font-headline text-4xl text-on-surface font-bold tracking-tight mb-2">
+                {greeting}, Dr. {doctorFirstName ? `${doctorFirstName} ${doctorLastName}` : "Rivera"} 👋
+              </h2>
               <p className="text-on-surface-variant max-w-2xl leading-relaxed">
                 System-wide neural monitoring and EEG analysis. Ready for new patient data.
               </p>
@@ -326,7 +624,7 @@ export default function DashboardClient() {
             {/* Expandable Upload Box */}
             <div className={`bg-surface-container-highest/20 rounded-2xl p-4 sm:p-6 border border-outline-variant/20 flex flex-col gap-6 mb-10 w-full shadow-lg transition-all duration-500 relative overflow-hidden h-auto justify-center`}>
               
-              {!isAnalysed && (
+              {!(isAnalysed || isAnalyzing) && (
                 <div className="flex flex-col items-center justify-center text-center space-y-2 mb-2 animate-in fade-in slide-in-from-bottom-2">
                   <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-2 shadow-[0_0_20px_rgba(217,70,239,0.15)] ring-1 ring-primary/30">
                     <span className="material-symbols-outlined text-4xl text-primary">analytics</span>
@@ -336,32 +634,39 @@ export default function DashboardClient() {
                 </div>
               )}
 
-              {!isAnalysed ? (
+              {!(isAnalysed || isAnalyzing) ? (
                 <div className="flex flex-col gap-6 w-full flex-1 max-w-5xl mx-auto">
                   
                   {/* Top Section: Patient Selection */}
-                  <div className="w-full bg-[#1A1821] border border-outline-variant/10 rounded-2xl p-6 shadow-md">
+                  <div className="w-full bg-surface-container border border-outline-variant/30 rounded-2xl p-6 shadow-md">
                     <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-[#E090FF] text-[11px] font-bold tracking-[0.15em] uppercase">Select Target Patient</h3>
-                      <span className="text-on-surface-variant/60 text-xs italic hidden sm:inline-block">Verify patient identity before proceeding</span>
+                      <h3 className="text-primary text-[11px] font-bold tracking-[0.15em] uppercase">Select Target Patient</h3>
+                      <div className="flex gap-4 items-center">
+                        <span className="text-on-surface-variant/60 text-xs italic hidden sm:inline-block">Verify patient identity before proceeding</span>
+                        <button onClick={() => setShowAddPatientModal(true)} className="px-4 py-2 bg-primary/20 text-primary border border-primary/30 rounded-xl text-xs font-bold hover:bg-primary hover:text-white transition-colors flex items-center gap-1">+ Add New Patient</button>
+                      </div>
                     </div>
                     <div className="flex gap-4">
                       <select 
-                        className="w-full h-[56px] bg-[#121016] border border-outline-variant/10 rounded-xl px-4 text-sm text-white outline-none focus:border-[#E090FF]/50 focus:ring-1 focus:ring-[#E090FF]/30 appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%24%2024%22%20fill%3D%22none%22%20stroke%3D%22%23E090FF%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:20px_20px] bg-no-repeat bg-[position:right_1.25rem_center]"
+                        className="w-full h-[56px] bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 text-sm text-on-surface outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 appearance-none bg-no-repeat bg-[position:right_1.25rem_center]"
+                        style={{
+                          backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%24%2024%22%20fill%3D%22none%22%20stroke%3D%22%23d946ef%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E")`,
+                          backgroundSize: '20px 20px'
+                        }}
                         value={selectedPatient}
                         onChange={(e) => setSelectedPatient(e.target.value)}
                       >
                         <option value="" disabled>Select a patient</option>
-                        {PATIENTS.map(p => <option key={p.id} value={p.name}>{p.name} (ID: {p.id})</option>)}
+                        {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} (ID: {p.id})</option>)}
                       </select>
-                      <div className="w-[56px] h-[56px] rounded-xl bg-surface-container border border-outline-variant/20 flex justify-center items-center shrink-0 overflow-hidden">
+                      <div className="w-[56px] h-[56px] rounded-xl bg-surface-container-high border border-outline-variant/30 flex justify-center items-center shrink-0 overflow-hidden">
                         <span className="material-symbols-outlined text-outline-variant text-[32px]">account_circle</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Middle Section: Dropzone + Analyse Button */}
-                  <div className="w-full mx-auto max-w-3xl bg-[#1A1821] border border-outline-variant/10 rounded-2xl flex flex-col relative overflow-hidden px-4 py-8 shadow-lg items-center justify-center mt-2">
+                  <div className="w-full mx-auto max-w-3xl bg-surface-container border border-outline-variant/30 rounded-2xl flex flex-col relative overflow-hidden px-4 py-8 shadow-lg items-center justify-center mt-2">
                     
                     <div 
                       className="w-full max-w-xl flex flex-col items-center justify-center p-6 cursor-pointer rounded-2xl transition-all text-center"
@@ -377,29 +682,29 @@ export default function DashboardClient() {
                       <input type="file" ref={fileInputRef} className="hidden" accept=".edf" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} />
                       
                       {selectedFile ? (
-                         <div className="flex flex-col items-center text-sm w-full justify-center gap-3 font-body bg-surface-container px-6 py-6 rounded-xl border border-outline-variant/30 inline-flex mt-2">
-                           <span className="material-symbols-outlined text-[#e090ff] text-[40px]">description</span>
+                         <div className="flex flex-col items-center text-sm w-full justify-center gap-3 font-body bg-surface-container-high px-6 py-6 rounded-xl border border-outline-variant/30 mt-2">
+                           <span className="material-symbols-outlined text-primary text-[40px]">description</span>
                            <div className="flex flex-col items-center">
-                             <span className="max-w-[300px] font-semibold truncate text-center text-white text-lg">{selectedFile.name}</span>
-                             <span className="text-xs text-[#e090ff] uppercase tracking-widest font-mono mt-1">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</span>
+                             <span className="max-w-[300px] font-semibold truncate text-center text-on-surface text-lg">{selectedFile.name}</span>
+                             <span className="text-xs text-primary uppercase tracking-widest font-mono mt-1">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</span>
                            </div>
                            <button className="text-outline hover:text-error transition-colors flex items-center bg-error/10 hover:bg-error/20 px-4 py-2 rounded-full mt-4" onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}><span className="material-symbols-outlined text-[16px] mr-2">close</span> Remove File</button>
                          </div>
                       ) : (
                          <>
-                           <div className="w-16 h-16 rounded-full border-[3px] border-dashed border-[#2A2536] bg-[#121016] flex items-center justify-center mb-4">
-                             <div className="w-10 h-10 bg-[#E090FF] rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(224,144,255,0.4)]">
-                               <span className="material-symbols-outlined text-[#1D192B] text-[24px] mt-0.5">cloud_upload</span>
+                           <div className="w-16 h-16 rounded-full border-[3px] border-dashed border-outline-variant/50 bg-surface-container-highest flex items-center justify-center mb-4">
+                             <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(217,70,239,0.2)]">
+                               <span className="material-symbols-outlined text-primary text-[24px] mt-0.5">cloud_upload</span>
                              </div>
                            </div>
                            
-                           <h4 className="text-white text-xl font-bold mb-6 tracking-wide">Drag and drop EEG raw files</h4>
+                           <h4 className="text-on-surface text-xl font-bold mb-6 tracking-wide">Drag and drop EEG raw files</h4>
 
                            <button 
                              onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                             className="px-5 py-2.5 rounded-xl border border-outline-variant/30 text-[#E090FF] font-bold text-sm hover:bg-white/5 transition-colors flex items-center gap-2 bg-surface-container-low"
+                             className="px-5 py-2.5 rounded-xl border border-outline-variant/50 text-on-surface font-bold text-sm hover:bg-surface-variant transition-colors flex items-center gap-2 bg-surface-container-lowest"
                            >
-                             <span className="material-symbols-outlined text-[20px]">folder</span> Browse Files
+                             <span className="material-symbols-outlined text-[20px] text-primary">folder</span> Browse Files
                            </button>
                          </>
                       )}
@@ -412,7 +717,7 @@ export default function DashboardClient() {
                             if (!selectedFile) setSelectedFile(new File([], "eeg_recording.edf")); // Mock file auto-fill
                             setTimeout(startAnalysis, 50);
                          }}
-                         className="w-full bg-[#E090FF] text-[#1D192B] font-bold text-[14px] tracking-wide py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(224,144,255,0.4)] hover:shadow-[0_0_30px_rgba(224,144,255,0.6)] transition-all hover:bg-white uppercase"
+                         className="w-full bg-primary text-on-primary-fixed font-bold text-[14px] tracking-wide py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-[0_4px_15px_rgba(217,70,239,0.3)] hover:shadow-[0_6px_25px_rgba(217,70,239,0.5)] transition-all hover:bg-primary-dim uppercase hover:-translate-y-0.5"
                        >
                           <span className="material-symbols-outlined text-[20px]">bolt</span> ANALYSE DATA
                        </button>
@@ -429,7 +734,7 @@ export default function DashboardClient() {
                       onChange={(e) => setSelectedPatient(e.target.value)}
                     >
                       <option value="" disabled>Select a patient</option>
-                      {PATIENTS.map(p => <option key={p.id} value={p.name}>{p.name} (ID: {p.id})</option>)}
+                      {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} (ID: {p.id})</option>)}
                     </select>
                   </div>
 
@@ -475,83 +780,43 @@ export default function DashboardClient() {
                 </div>
               )}
 
-              {uploadError && !isAnalysed && <div className="text-error text-xs font-semibold mt-2 text-center flex justify-center items-center gap-1"><span className="material-symbols-outlined text-[14px]">error</span> {uploadError}</div>}
+              {uploadError && !isAnalysed && !isAnalyzing && <div className="text-error text-xs font-semibold mt-2 text-center flex justify-center items-center gap-1"><span className="material-symbols-outlined text-[14px]">error</span> {uploadError}</div>}
             </div>
 
-            {uploadError && isAnalysed && <div className="text-error text-xs font-semibold mb-6 flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">error</span> {uploadError}</div>}
+            {uploadError && (isAnalysed || isAnalyzing) && <div className="text-error text-xs font-semibold mb-6 flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">error</span> {uploadError}</div>}
+
+            {isAnalyzing && (
+              <div className="w-full flex justify-center items-center py-20 px-4 animate-in fade-in zoom-in duration-300">
+                <div className="flex flex-col items-center gap-6 p-8 bg-surface-container border border-primary/20 rounded-2xl shadow-xl w-full max-w-lg">
+                  <div className="relative">
+                    <div className="w-20 h-20 rounded-full border-[4px] border-primary/10 border-t-primary animate-spin"></div>
+                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                      <span className="material-symbols-outlined text-primary text-3xl animate-pulse">neurology</span>
+                    </div>
+                  </div>
+                  <div className="text-center space-y-2">
+                    <h2 className="text-2xl font-bold font-headline text-on-surface">Injecting EEG Data...</h2>
+                    <p className="text-on-surface-variant text-sm font-mono uppercase tracking-[0.15em] animate-pulse">Running Neural Pattern Recognition Model</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {isAnalysed && (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
-                {/* 4 STAT CARDS */}
-                <div className="flex flex-col mt-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                    {/* Card 1 */}
-                    <div className="bg-[#1D1B22] border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container transition-all duration-300">
-                      <div className="w-[42px] h-[42px] bg-cyan-900/30 rounded-[10px] flex items-center justify-center">
-                        <span className="material-symbols-outlined text-cyan-400 text-[20px]">schedule</span>
-                      </div>
-                      
-                      <div className="flex flex-col gap-1 w-full mt-5">
-                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/90">Recording Duration</h3>
-                      </div>
-                      
-                      <div className="mt-4 flex flex-col gap-1 w-full">
-                        <div className="text-[32px] font-bold text-cyan-400 font-mono tracking-tight leading-none">4.5 hrs</div>
-                        <div className="text-[12px] text-on-surface-variant/80 mt-1">256 Hz · 23 channels</div>
-                      </div>
-                    </div>
-
-                    {/* Card 2 */}
-                    <div className="bg-[#1D1B22] border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container transition-all duration-300">
-                      <div className="w-[42px] h-[42px] bg-amber-900/30 rounded-[10px] flex items-center justify-center">
-                        <span className="material-symbols-outlined text-amber-500 text-[20px]">warning</span>
-                      </div>
-                      
-                      <div className="flex flex-col gap-1 w-full mt-5">
-                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/90">Seizures Found</h3>
-                      </div>
-                      
-                      <div className="mt-4 flex flex-col gap-1 w-full">
-                        <div className="text-[32px] font-bold text-amber-500 font-mono tracking-tight leading-none">2</div>
-                        <div className="text-[12px] text-on-surface-variant/80 mt-1">In this recording</div>
-                       </div>
-                    </div>
-
-                    {/* Card 3 */}
-                    <div className="bg-[#1D1B22] border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container transition-all duration-300">
-                      <div className="w-[42px] h-[42px] bg-emerald-900/30 rounded-[10px] flex items-center justify-center">
-                        <span className="material-symbols-outlined text-emerald-500 text-[20px]">show_chart</span>
-                      </div>
-                      
-                      <div className="flex flex-col gap-1 w-full mt-5">
-                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/90">AI Confidence</h3>
-                      </div>
-                      
-                      <div className="mt-4 flex flex-col gap-1 w-full">
-                        <div className="text-[32px] font-bold text-emerald-500 font-mono tracking-tight leading-none">92.3%</div>
-                        <div className="text-[12px] text-on-surface-variant/80 mt-1">Peak detection score</div>
-                      </div>
-                    </div>
-
-                    {/* Card 4 */}
-                    <div className="bg-[#1D1B22] border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container transition-all duration-300">
-                      <div className="w-[42px] h-[42px] bg-blue-900/30 rounded-[10px] flex items-center justify-center">
-                        <span className="material-symbols-outlined text-blue-500 text-[20px]">web_asset</span>
-                      </div>
-                      
-                      <div className="flex flex-col gap-1 w-full mt-5">
-                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-white/90">Windows Analysed</h3>
-                      </div>
-                      
-                      <div className="mt-4 flex flex-col gap-1 w-full">
-                        <div className="text-[32px] font-bold text-blue-500 font-mono tracking-tight leading-none">8,100</div>
-                        <div className="text-[12px] text-on-surface-variant/80 mt-1">4s windows · 50% overlap</div>
-                      </div>
-                    </div>
-                  </div>
+                
+                {/* Recording Info Row */}
+                <div className="flex flex-wrap items-center gap-4 font-mono text-sm text-on-surface-variant bg-surface-container border border-outline-variant/30 px-6 py-4 rounded-xl mb-4">
+                  <span className="text-on-surface font-semibold">Patient: {patients.find(p => p.id === selectedPatient) ? `${patients.find(p => p.id === selectedPatient)?.firstName} ${patients.find(p => p.id === selectedPatient)?.lastName}` : (selectedPatient || "Unknown")}</span>
+                  <span className="opacity-40">•</span>
+                  <span>Duration: 4.5 hours</span>
+                  <span className="opacity-40">•</span>
+                  <span>Date: 14 Oct 2026</span>
+                  <span className="opacity-40">•</span>
+                  <span className="bg-amber-500/10 text-amber-500 border border-amber-500/40 px-2 py-0.5 rounded uppercase text-[10px] font-bold tracking-widest">Seizure Found</span>
+                  <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/40 px-2 py-0.5 rounded uppercase text-[10px] font-bold tracking-widest">92.3% Confidence</span>
                 </div>
 
-                {/* --- OLD RESULTS CONTENT --- */}
                 {/* Alert Banner */}
                 <div className="w-full bg-amber-500/10 border-l-[4px] border-amber-500 rounded-r-xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-md mb-8">
                   <div className="flex items-start gap-4">
@@ -571,16 +836,73 @@ export default function DashboardClient() {
                   </div>
                 </div>
 
-                {/* Recording Info Row */}
-                <div className="flex flex-wrap items-center gap-4 font-mono text-sm text-on-surface-variant bg-surface-container border border-outline-variant/30 px-6 py-4 rounded-xl mb-8">
-                  <span className="text-on-surface font-semibold">Patient: Marcus Holloway</span>
-                  <span className="opacity-40">•</span>
-                  <span>Duration: 4.5 hours</span>
-                  <span className="opacity-40">•</span>
-                  <span>Date: 14 Oct 2026</span>
-                  <span className="opacity-40">•</span>
-                  <span className="bg-amber-500/10 text-amber-500 border border-amber-500/40 px-2 py-0.5 rounded uppercase text-[10px] font-bold tracking-widest">Seizure Found</span>
-                  <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/40 px-2 py-0.5 rounded uppercase text-[10px] font-bold tracking-widest">92.3% Confidence</span>
+                {/* 4 STAT CARDS */}
+                <div className="flex flex-col mt-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                    {/* Card 1 */}
+                    <div className="bg-surface-container border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container-high transition-all duration-300">
+                      <div className="w-[42px] h-[42px] bg-cyan-900/10 dark:bg-cyan-900/30 rounded-[10px] flex items-center justify-center">
+                        <span className="material-symbols-outlined text-cyan-600 dark:text-cyan-400 text-[20px]">schedule</span>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 w-full mt-5">
+                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-on-surface/90">Recording Duration</h3>
+                      </div>
+                      
+                      <div className="mt-4 flex flex-col gap-1 w-full">
+                        <div className="text-[32px] font-bold text-cyan-600 dark:text-cyan-400 font-mono tracking-tight leading-none">4.5 hrs</div>
+                        <div className="text-[12px] text-on-surface-variant/80 mt-1">256 Hz · 23 channels</div>
+                      </div>
+                    </div>
+
+                    {/* Card 2 */}
+                    <div className="bg-surface-container border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container-high transition-all duration-300">
+                      <div className="w-[42px] h-[42px] bg-amber-900/10 dark:bg-amber-900/30 rounded-[10px] flex items-center justify-center">
+                        <span className="material-symbols-outlined text-amber-600 dark:text-amber-500 text-[20px]">warning</span>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 w-full mt-5">
+                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-on-surface/90">Seizures Found</h3>
+                      </div>
+                      
+                      <div className="mt-4 flex flex-col gap-1 w-full">
+                        <div className="text-[32px] font-bold text-amber-600 dark:text-amber-500 font-mono tracking-tight leading-none">2</div>
+                        <div className="text-[12px] text-on-surface-variant/80 mt-1">In this recording</div>
+                       </div>
+                    </div>
+
+                    {/* Card 3 */}
+                    <div className="bg-surface-container border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container-high transition-all duration-300">
+                      <div className="w-[42px] h-[42px] bg-emerald-900/10 dark:bg-emerald-900/30 rounded-[10px] flex items-center justify-center">
+                        <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-500 text-[20px]">show_chart</span>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 w-full mt-5">
+                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-on-surface/90">AI Confidence</h3>
+                      </div>
+                      
+                      <div className="mt-4 flex flex-col gap-1 w-full">
+                        <div className="text-[32px] font-bold text-emerald-600 dark:text-emerald-500 font-mono tracking-tight leading-none">92.3%</div>
+                        <div className="text-[12px] text-on-surface-variant/80 mt-1">Peak detection score</div>
+                      </div>
+                    </div>
+
+                    {/* Card 4 */}
+                    <div className="bg-surface-container border border-outline-variant/10 rounded-2xl p-6 shadow-xl relative flex flex-col items-start hover:scale-[1.02] hover:bg-surface-container-high transition-all duration-300">
+                      <div className="w-[42px] h-[42px] bg-blue-900/10 dark:bg-blue-900/30 rounded-[10px] flex items-center justify-center">
+                        <span className="material-symbols-outlined text-blue-600 dark:text-blue-500 text-[20px]">web_asset</span>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 w-full mt-5">
+                        <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-on-surface/90">Windows Analysed</h3>
+                      </div>
+                      
+                      <div className="mt-4 flex flex-col gap-1 w-full">
+                        <div className="text-[32px] font-bold text-blue-600 dark:text-blue-500 font-mono tracking-tight leading-none">8,100</div>
+                        <div className="text-[12px] text-on-surface-variant/80 mt-1">4s windows · 50% overlap</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* EEG Timeline Card */}
@@ -631,7 +953,7 @@ export default function DashboardClient() {
                      </div>
 
                      <div className="w-full bg-surface-container h-1 rounded flex mb-6"><div className="w-[92.3%] bg-emerald-500 rounded shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div></div>
-                     <button className="w-full py-2 bg-surface-container-high hover:bg-surface-variant text-primary text-sm font-bold rounded-lg border border-primary/20 transition-all duration-300 hover:shadow-[0_0_15px_rgba(217,70,239,0.2)] hover:border-primary/50">View Details</button>
+                     <button onClick={() => setSelectedEventPopup(1)} className="w-full py-2 bg-surface-container-high hover:bg-surface-variant text-primary text-sm font-bold rounded-lg border border-primary/20 transition-all duration-300 hover:shadow-[0_0_15px_rgba(217,70,239,0.2)] hover:border-primary/50">View Details</button>
                   </div>
 
                   <div className="bg-surface-container-low border border-outline-variant/20 border-l-[4px] border-l-amber-500 rounded-xl p-5 shadow-lg relative">
@@ -648,7 +970,7 @@ export default function DashboardClient() {
                      </div>
 
                      <div className="w-full bg-surface-container h-1 rounded flex mb-6"><div className="w-[78.6%] bg-primary rounded shadow-[0_0_10px_rgba(217,70,239,0.5)]"></div></div>
-                     <button className="w-full py-2 bg-surface-container-high hover:bg-surface-variant text-primary text-sm font-bold rounded-lg border border-primary/20 transition-all duration-300 hover:shadow-[0_0_15px_rgba(217,70,239,0.2)] hover:border-primary/50">View Details</button>
+                     <button onClick={() => setSelectedEventPopup(2)} className="w-full py-2 bg-surface-container-high hover:bg-surface-variant text-primary text-sm font-bold rounded-lg border border-primary/20 transition-all duration-300 hover:shadow-[0_0_15px_rgba(217,70,239,0.2)] hover:border-primary/50">View Details</button>
                   </div>
                 </div>
 
@@ -792,30 +1114,6 @@ export default function DashboardClient() {
                    )}
                 </div>
 
-                {/* Add Clinical Note */}
-                <div className="bg-surface-container-low border border-outline-variant/20 rounded-2xl p-8 shadow-xl mt-8 relative overflow-hidden">
-                   <h3 className="font-headline font-bold text-xl text-on-surface mb-2">Add Clinical Note</h3>
-                   <p className="text-sm text-on-surface-variant mb-6">These notes will be synchronized to the patient's profile in real-time.</p>
-                   
-                   <textarea 
-                      value={noteContent}
-                      onChange={(e) => setNoteContent(e.target.value)}
-                      placeholder="Type your clinical observation here..."
-                      className="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl p-4 text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 min-h-[120px] mb-4 font-body"
-                   />
-                   
-                   <div className="flex justify-end items-center gap-4">
-                      {noteAdded && <span className="text-emerald-500 text-sm font-bold flex items-center gap-1 animate-in fade-in slide-in-from-bottom-2"><span className="material-symbols-outlined text-[18px]">check_circle</span> Saved to Patient Profile</span>}
-                      <button 
-                         onClick={handleAddNote}
-                         disabled={!noteContent.trim()}
-                         className="px-6 py-3 bg-primary text-on-primary-fixed font-bold rounded-lg hover:bg-primary-dim transition-all shadow-[0_4px_15px_rgba(217,70,239,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:-translate-y-0 flex items-center gap-2"
-                      >
-                         <span className="material-symbols-outlined text-[20px]">add_notes</span> Save Note
-                      </button>
-                   </div>
-                </div>
-
               </div>
             )}
           </div>
@@ -834,53 +1132,76 @@ export default function DashboardClient() {
                 
                 <div className="w-full overflow-x-auto">
                   <table className="w-full text-sm text-left min-w-[800px]">
-                    <thead className="text-xs uppercase bg-surface-container/50 text-outline border-b border-outline-variant/20 font-label tracking-wide">
+                    <thead className="text-xs uppercase bg-surface-container/50 text-on-surface border-b border-outline-variant/20 font-label tracking-wide">
                       <tr>
-                        <th className="px-6 py-4 font-semibold w-[20%]">Patient</th>
-                        <th className="px-6 py-4 font-semibold w-[20%]">File</th>
+                        <th className="px-6 py-4 font-semibold w-[15%]">Patient ID</th>
+                        <th className="px-6 py-4 font-semibold w-[20%]">Name</th>
+                        <th className="px-6 py-4 font-semibold w-[20%]">No.of recordings</th>
                         <th className="px-6 py-4 font-semibold w-[15%]">Date</th>
-                        <th className="px-6 py-4 font-semibold w-[15%]">Duration</th>
                         <th className="px-6 py-4 font-semibold w-[15%]">Status</th>
                         <th className="px-6 py-4 font-semibold w-[15%]">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-outline-variant/20 text-on-surface-variant font-medium">
-                      {recordingsList.map((rec, idx) => (
-                        <tr key={idx} className="hover:bg-surface-container-highest/30 transition-colors group">
-                          <td className="px-6 py-5 text-on-surface">
-                            <button onClick={() => setAnalyticsSelectedPatientName(rec.patient)} className="hover:text-primary hover:underline transition-colors focus:outline-none text-left">
-                              {rec.patient}
-                            </button>
-                          </td>
-                          <td className="px-6 py-5">{rec.file}</td>
-                          <td className="px-6 py-5">{rec.date}</td>
-                          <td className="px-6 py-5">{rec.duration}</td>
-                          <td className="px-6 py-5">
-                             <span className={`text-[13px] ${
-                               rec.status === 'Processing' ? 'text-on-surface-variant' :
-                               rec.status === 'Failed' ? 'text-on-surface-variant' :
-                               'text-on-surface-variant'
-                             }`}>
-                               {rec.status}
-                             </span>
-                          </td>
-                          <td className="px-6 py-5">
-                             <button className={`text-[13px] hover:text-primary transition-colors hover:underline ${
-                                rec.status === 'Processing' ? 'text-on-surface-variant' :
-                                rec.status === 'Failed' ? 'text-on-surface-variant' :
-                                'text-on-surface-variant'
-                             }`}>
-                               {rec.action}
-                             </button>
-                          </td>
+                      {patients.map((patient) => {
+                        // Find recordings linked to this patient's ID and remove exact file duplicates dynamically to ensure correct counts
+                        let patientRecordings = recordingsList.filter(r => r.patient.includes(patient.id));
+                        patientRecordings = patientRecordings.filter((rec, index, self) =>
+                          index === self.findIndex((t) => t.file === rec.file)
+                        );
+                        const analysisDoneCount = patientRecordings.filter(r => r.status === 'Processed').length;
+                        const lastDate = patientRecordings.length > 0 ? patientRecordings[0].date : 'N/A';
+                        
+                        let statusText = 'Pending';
+                        if (patientRecordings.length > 0 && analysisDoneCount > 0) {
+                          statusText = 'Processed';
+                        }
+                        
+                        return (
+                          <tr key={patient.id} className="hover:bg-surface-container-highest/30 transition-colors group">
+                            <td className="px-6 py-5 text-on-surface font-bold">
+                              {patient.id}
+                            </td>
+                            <td className="px-6 py-5 text-on-surface">
+                              {patient.firstName} {patient.lastName}
+                            </td>
+                            <td className="px-6 py-5">{analysisDoneCount}</td>
+                            <td className="px-6 py-5">{lastDate}</td>
+                            <td className="px-6 py-5">
+                              <span className={`text-[12px] px-2 py-1 rounded border font-bold uppercase tracking-widest ${
+                                 statusText === 'Processed' ? 'border-primary/30 text-primary bg-primary/10' :
+                                 'border-amber-500/30 text-amber-500 bg-amber-500/10'
+                               }`}>
+                                 {statusText}
+                               </span>
+                            </td>
+                            <td className="px-6 py-5">
+                               <button 
+                                 onClick={() => setAnalyticsSelectedPatientName(patient.id)} 
+                                 className="text-[13px] text-primary hover:text-primary-dim transition-colors hover:underline font-semibold"
+                               >
+                                 View History
+                               </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {patients.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-8 text-center text-on-surface-variant">No patients added yet.</td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
             ) : (() => {
-              const patientRecordings = recordingsList.filter(r => r.patient === analyticsSelectedPatientName);
+              const matchedPatient = patients.find(p => p.id === analyticsSelectedPatientName);
+              const patientName = matchedPatient ? `${matchedPatient.firstName} ${matchedPatient.lastName}` : analyticsSelectedPatientName;
+              let patientRecordings = recordingsList.filter(r => r.patient.includes(analyticsSelectedPatientName as string));
+              patientRecordings = patientRecordings.filter((rec, index, self) =>
+                index === self.findIndex((t) => t.file === rec.file)
+              );
               const totalRecordings = patientRecordings.length;
               
               return (
@@ -891,8 +1212,10 @@ export default function DashboardClient() {
                       <span className="material-symbols-outlined text-[20px] group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
                     </button>
                     <div>
-                      <h3 className="font-headline font-bold text-2xl text-on-surface">{analyticsSelectedPatientName}</h3>
-                      <p className="text-xs text-on-surface-variant font-mono mt-1">Status: Routine Monitoring</p>
+                      <h3 className="font-headline font-bold text-2xl text-on-surface">{patientName} ({analyticsSelectedPatientName})</h3>
+                      <p className="text-xs text-on-surface-variant font-mono mt-1">
+                        {matchedPatient ? `${matchedPatient.gender} • ${matchedPatient.age}yrs • Symptoms: ${matchedPatient.symptoms || 'N/A'}` : "Status: Routine Monitoring"}
+                      </p>
                     </div>
                   </div>
                   <div>
@@ -912,7 +1235,7 @@ export default function DashboardClient() {
                     </div>
                     <div className="bg-surface-container-lowest border border-outline-variant/10 p-5 rounded-xl shadow-lg border-l-[3px] border-l-primary">
                       <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest mb-1 flex items-center gap-1.5"><span className="material-symbols-outlined text-[16px]">history</span> Last Interaction</h4>
-                      <p className="text-sm font-medium text-on-surface mt-2">Review discussion with Dr. Rivera</p>
+                      <p className="text-sm font-medium text-on-surface mt-2">Review discussion with Dr. {doctorLastName}</p>
                       <p className="text-xs text-primary font-mono mt-1.5">Last Week</p>
                     </div>
                     <div className="bg-surface-container-lowest border border-outline-variant/10 p-5 rounded-xl shadow-lg border-l-[3px] border-l-amber-500">
@@ -927,7 +1250,7 @@ export default function DashboardClient() {
                     <h3 className="font-headline font-bold text-lg text-primary mb-4 flex items-center gap-2"><span className="material-symbols-outlined">analytics</span> Analysis History</h3>
                     <div className="space-y-4">
                       {patientRecordings.map((rec, i) => (
-                        <div key={i} className="bg-[#1D1B22] border border-outline-variant/20 rounded-xl p-6 shadow-xl relative overflow-hidden group hover:border-primary/40 transition-colors">
+                        <div key={i} className="bg-surface-container border border-outline-variant/20 rounded-xl p-6 shadow-xl relative overflow-hidden group hover:border-primary/40 transition-colors">
                           {i === 0 && <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary to-amber-500 opacity-80"></div>}
                           
                           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
@@ -960,7 +1283,17 @@ export default function DashboardClient() {
                              </div>
                              <div>
                                <p className="text-[10px] text-outline uppercase tracking-widest mb-1.5">Action</p>
-                               <p className="text-[11px] text-primary font-bold uppercase tracking-wider underline cursor-pointer hover:text-primary-dim transition-colors">Review Results</p>
+                               <p 
+                                 onClick={() => {
+                                   if (analyticsSelectedPatientName) setSelectedPatient(analyticsSelectedPatientName);
+                                   setSelectedFile(new File([], rec.file));
+                                   setIsAnalysed(true);
+                                   setActiveTab("dashboard");
+                                 }}
+                                 className="text-[11px] text-primary font-bold uppercase tracking-wider underline cursor-pointer hover:text-primary-dim transition-colors"
+                               >
+                                 View Results
+                               </p>
                              </div>
                           </div>
                         </div>
