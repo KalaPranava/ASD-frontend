@@ -27,3 +27,4 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## Development Status
 This repository functions as the `frontend` interface. It operates using mock data blocks (`DashboardClient.tsx`, `ResultsView.tsx`) to illustrate the UI state flow of an active patient recording being analyzed by a mock AI detection service.
+  
